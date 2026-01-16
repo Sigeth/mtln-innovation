@@ -8,45 +8,105 @@ app = Flask(__name__)
 
 # PostgreSQL configuration
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
+    'host': os.getenv('DB_HOST', 'db'),
     'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'your_database'),
-    'user': os.getenv('DB_USER', 'postgres'),
+    'database': os.getenv('DB_NAME', 'mydatabase'),
+    'user': os.getenv('DB_USER', 'user'),
     'password': os.getenv('DB_PASSWORD', 'password')
 }
 
-@app.route('/submit', methods=['POST'])
+@app.route('/api/submit', methods=['POST'])
 def submit():
     """
-    Receives JSON data and executes a SQL query.
-    Expected JSON format: {"query": "SELECT * FROM table_name"}
+    Receives JSON report from frontend and inserts it into building_reports table.
+    Expected JSON fields (from frontend):
+      - buildingName (string)
+      - date (YYYY-MM-DD)
+      - commanderNote (string)
+      - photoCaption (string)
+      - satisfaction (int)
+      - fuel (number or string)
+      - water (number or string)
+      - provisions (number or string)
+      - armament (string)
+      - defibrillators { available, total }
+      - previsionJ1 (string)
     """
     try:
         data = request.get_json()
-        
-        if not data or 'query' not in data:
-            return jsonify({'error': 'Missing query in request body'}), 400
-        
-        sql_query = data['query']
-        
-        # Execute SQL query
+        if not data:
+            return jsonify({'error': 'Missing JSON body'}), 400
+
+        # Required minimal fields
+        building_name = data.get('buildingName')
+        report_date = data.get('date')  # expected YYYY-MM-DD
+        if not building_name or not report_date:
+            return jsonify({'error': 'Missing buildingName or date'}), 400
+
+        commander_note = data.get('commanderNote')
+        photo_caption = data.get('photoCaption')
+        satisfaction = data.get('satisfaction')
+        try:
+            satisfaction = int(satisfaction) if satisfaction is not None else None
+        except (ValueError, TypeError):
+            satisfaction = None
+
+        fuel = data.get('fuel')
+        water = data.get('water')
+        provisions = data.get('provisions')
+        armament = data.get('armament')
+        defibs = data.get('defibrillators') or {}
+        defib_available = defibs.get('available')
+        defib_total = defibs.get('total')
+        prevision_j1 = data.get('previsionJ1')
+
+        insert_sql = """
+            INSERT INTO building_reports (
+                building_name,
+                report_date,
+                commander_note,
+                photo_caption,
+                satisfaction,
+                fuel,
+                water,
+                provisions,
+                armament,
+                defibrillators_available,
+                defibrillators_total,
+                prevision_j1
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, created_at;
+        """
+
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(sql_query)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(insert_sql, (
+            building_name,
+            report_date,
+            commander_note,
+            photo_caption,
+            satisfaction,
+            fuel,
+            water,
+            provisions,
+            armament,
+            defib_available,
+            defib_total,
+            prevision_j1
+        ))
+        inserted = cur.fetchone()
         conn.commit()
-        
-        result = cursor.fetchall()
-        cursor.close()
+        cur.close()
         conn.close()
-        
-        return jsonify({'success': True, 'result': [dict(row) for row in result]}), 200
-    
+
+        return jsonify({'success': True, 'inserted': inserted}), 201
+
     except psycopg2.Error as e:
         return jsonify({'error': f'Database error: {str(e)}'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/llm', methods=['POST'])
+@app.route('/api/llm', methods=['POST'])
 def llm():
     """
     Sends a query to an LLM and returns the response.
@@ -76,4 +136,4 @@ def call_llm(prompt):
     return "LLM response placeholder"
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    app.run(host="0.0.0.0", port=8000)

@@ -28,7 +28,7 @@ const ArmyBaseSystem = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const result = await window.storage.get('army-reports');
+        const result = await window.localStorage.get('army-reports');
         if (result) {
           setReports(JSON.parse(result.value));
         }
@@ -79,32 +79,45 @@ const ArmyBaseSystem = () => {
       photo: photoPreview
     };
     
-    const updatedReports = [...reports, newReport];
-    setReports(updatedReports);
-    
     try {
-      await window.storage.set('army-reports', JSON.stringify(updatedReports));
-    } catch (error) {
-      console.error('Error saving report:', error);
-    }
+      const response = await fetch('/api/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newReport)
+      });
 
-    setFormData({
-      buildingName: '',
-      date: new Date().toISOString().split('T')[0],
-      commanderNote: '',
-      photoCaption: '',
-      satisfaction: 5,
-      fuel: '',
-      water: '',
-      provisions: '',
-      armament: '',
-      defibrillators: { available: '', total: '' },
-      previsionJ1: ''
-    });
-    setPhotoFile(null);
-    setPhotoPreview(null);
-    
-    alert('Rapport enregistré avec succès');
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.statusText}`);
+      }
+
+      const updatedReports = [...reports, newReport];
+      setReports(updatedReports);
+
+      await window.localStorage.set('army-reports', JSON.stringify(updatedReports));
+      
+      setFormData({
+        buildingName: '',
+        date: new Date().toISOString().split('T')[0],
+        commanderNote: '',
+        photoCaption: '',
+        satisfaction: 5,
+        fuel: '',
+        water: '',
+        provisions: '',
+        armament: '',
+        defibrillators: { available: '', total: '' },
+        previsionJ1: ''
+      });
+      setPhotoFile(null);
+      setPhotoPreview(null);
+      
+      alert('Rapport enregistré avec succès');
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      alert(`Erreur lors de l'envoi: ${error.message}`);
+    }
   };
 
   const getBasesList = () => {
