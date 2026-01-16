@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Ship, FileText, Send, Calendar, Fuel, Droplets, Package, Shield, Heart, Image as ImageIcon } from 'lucide-react';
+import { Ship, FileText, Send, Calendar, Fuel, Droplets, Package, Shield, Heart, Image as ImageIcon, TrendingUp } from 'lucide-react';
 
 const ArmyBaseSystem = () => {
   const [activeTab, setActiveTab] = useState('form');
   const [reports, setReports] = useState([]);
   const [selectedBase, setSelectedBase] = useState(null);
-  const [conversation, setConversation] = useState([]);
   const [loading, setLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
-  
+  const [conversation, setConversation] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [stats, setStats] = useState([]);
+
   const [formData, setFormData] = useState({
     buildingName: '',
     date: new Date().toISOString().split('T')[0],
@@ -38,6 +41,28 @@ const ArmyBaseSystem = () => {
     };
     loadData();
   }, []);
+
+  // Load dashboard stats
+  useEffect(() => {
+    if (activeTab === 'summary') {
+      fetchStats();
+    }
+  }, [activeTab]);
+
+  const fetchStats = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/stats');
+      const data = await response.json();
+      if (data.success) {
+        setStats(data.stats);
+      }
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -139,72 +164,49 @@ const ArmyBaseSystem = () => {
     return Object.values(bases);
   };
 
-  const generateAISummary = async () => {
-    if (!selectedBase) return;
-    
-    const baseReports = reports.filter(r => r.buildingName === selectedBase);
-    if (baseReports.length === 0) return;
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
 
-    setLoading(true);
-    setConversation(prev => [...prev, {
-      role: 'user',
-      content: `Analyse les données du bâtiment ${selectedBase}`
-    }]);
+    const userMessage = chatInput;
+    setConversation(prev => [...prev, { role: 'user', content: userMessage }]);
+    setChatInput('');
+    setChatLoading(true);
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('/api/llm', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: `Tu es un assistant militaire. Analyse ces rapports quotidiens du bâtiment "${selectedBase}" et fournis un résumé stratégique concis en français.
-
-Données des rapports:
-${JSON.stringify(baseReports, null, 2)}
-
-Fournis:
-1. Vue d'ensemble de l'état opérationnel
-2. Tendances des ressources (carburant, eau, vivres)
-3. Points d'attention critiques
-4. Recommandations
-
-Sois concis et professionnel.`
-          }]
-        })
+        body: JSON.stringify({ prompt: userMessage })
       });
 
       const data = await response.json();
-      const aiResponse = data.content
-        .filter(item => item.type === 'text')
-        .map(item => item.text)
-        .join('\n');
-
-      setConversation(prev => [...prev, {
-        role: 'assistant',
-        content: aiResponse
-      }]);
+      if (data.success) {
+        setConversation(prev => [...prev, { role: 'assistant', content: data.response }]);
+      } else {
+        setConversation(prev => [...prev, { role: 'assistant', content: `Erreur: ${data.error}` }]);
+      }
     } catch (error) {
-      setConversation(prev => [...prev, {
-        role: 'assistant',
-        content: `Erreur lors de l'analyse: ${error.message}`
-      }]);
+      setConversation(prev => [...prev, { role: 'assistant', content: `Erreur de connexion: ${error.message}` }]);
     } finally {
-      setLoading(false);
+      setChatLoading(false);
     }
   };
 
-  const selectBase = (baseName) => {
-    setSelectedBase(baseName);
-    setConversation([]);
+  const getGlobalStats = () => {
+    if (stats.length === 0) return null;
+    return {
+      totalBuildings: stats.length,
+      avgSatisfaction: (stats.reduce((acc, s) => acc + (parseFloat(s.avg_satisfaction) || 0), 0) / stats.length).toFixed(1),
+      totalReports: stats.reduce((acc, s) => acc + s.total_reports, 0)
+    };
   };
 
   const bases = getBasesList();
   const selectedBaseReports = selectedBase ? reports.filter(r => r.buildingName === selectedBase) : [];
+  const globalStats = getGlobalStats();
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
@@ -247,6 +249,7 @@ Sois concis et professionnel.`
           </div>
         </div>
       </div>
+      <div></div>
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -441,119 +444,139 @@ Sois concis et professionnel.`
             </form>
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-6 h-[calc(100vh-240px)]">
-            {/* Base List */}
-            <div className="bg-slate-800 rounded-lg p-4 overflow-y-auto">
-              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Ship className="w-5 h-5 text-green-500" />
-                Bâtiments
-              </h3>
-              {bases.length === 0 ? (
-                <p className="text-slate-400 text-sm">Aucun rapport disponible</p>
-              ) : (
-                <div className="space-y-2">
-                  {bases.map(base => (
-                    <button
-                      key={base.name}
-                      onClick={() => selectBase(base.name)}
-                      className={`w-full text-left p-3 rounded-lg transition-colors ${
-                        selectedBase === base.name
-                          ? 'bg-green-600 text-white'
-                          : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
-                      }`}
+          <div className="flex flex-col gap-6 h-full">
+            {/* Global Stats Section */}
+            {loading ? (
+              <div className="text-center py-8 text-slate-400">Chargement des données...</div>
+            ) : globalStats ? (
+              <div className="bg-slate-800 rounded-lg p-6">
+                <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                  <TrendingUp className="w-6 h-6 text-green-500" />
+                  Statistiques Globales
+                </h2>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div className="bg-slate-700 rounded-lg p-4">
+                    <div className="text-slate-400 mb-1">Bâtiments</div>
+                    <div className="text-2xl font-semibold text-green-400">{globalStats.totalBuildings}</div>
+                  </div>
+                  <div className="bg-slate-700 rounded-lg p-4">
+                    <div className="text-slate-400 mb-1">Total Rapports</div>
+                    <div className="text-2xl font-semibold">{globalStats.totalReports}</div>
+                  </div>
+                  <div className="bg-slate-700 rounded-lg p-4">
+                    <div className="text-slate-400 mb-1">Satisfaction moy.</div>
+                    <div 
+                      className="text-2xl font-semibold rounded px-2 py-1"
+                      style={{ color: getSatisfactionColor(parseFloat(globalStats.avgSatisfaction)) }}
                     >
-                      <div className="font-medium">{base.name}</div>
-                      <div className="text-sm opacity-75">{base.reportCount} rapports</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Main Content */}
-            <div className="col-span-3 flex flex-col gap-4">
-              {/* Profile Card */}
-              {selectedBase && (
-                <div className="bg-slate-800 rounded-lg p-6">
-                  <h2 className="text-2xl font-bold mb-4">{selectedBase}</h2>
-                  <div className="grid grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <div className="text-slate-400">Rapports</div>
-                      <div className="text-xl font-semibold text-green-400">{selectedBaseReports.length}</div>
+                      {globalStats.avgSatisfaction}/10
                     </div>
-                    {selectedBaseReports.length > 0 && (
-                      <>
-                        <div>
-                          <div className="text-slate-400">Dernier rapport</div>
-                          <div className="text-xl font-semibold">{new Date(selectedBaseReports[selectedBaseReports.length - 1].date).toLocaleDateString('fr-FR')}</div>
-                        </div>
-                        <div>
-                          <div className="text-slate-400">Satisfaction moy.</div>
-                          <div className="text-xl font-semibold">
-                            {(selectedBaseReports.reduce((acc, r) => acc + r.satisfaction, 0) / selectedBaseReports.length).toFixed(1)}/10
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-slate-400">Eau moyenne</div>
-                          <div className="text-xl font-semibold">
-                            {(selectedBaseReports.reduce((acc, r) => acc + parseInt(r.water || 0), 0) / selectedBaseReports.length).toFixed(0)} jours
-                          </div>
-                        </div>
-                      </>
-                    )}
                   </div>
                 </div>
-              )}
+              </div>
+            ) : null}
 
-              {/* Conversation */}
-              <div className="flex-1 bg-slate-800 rounded-lg flex flex-col">
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                  {conversation.length === 0 && selectedBase && (
-                    <div className="text-center text-slate-400 py-8">
-                      <p>Cliquez sur "Générer l'Analyse IA" pour obtenir un résumé des données</p>
-                    </div>
-                  )}
-                  {!selectedBase && (
-                    <div className="text-center text-slate-400 py-8">
-                      <p>Sélectionnez un bâtiment pour voir l'analyse</p>
-                    </div>
-                  )}
-                  {conversation.map((msg, idx) => (
-                    <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-3xl rounded-lg p-4 ${
-                        msg.role === 'user' 
-                          ? 'bg-green-600 text-white' 
-                          : 'bg-slate-700 text-slate-100'
-                      }`}>
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
+            {/* Buildings Stats Section */}
+            {stats.length > 0 && (
+              <div className="bg-slate-800 rounded-lg p-6">
+                <h3 className="text-xl font-semibold mb-4">Détails par Bâtiment</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {stats.map(stat => (
+                    <div key={stat.building_name} className="bg-slate-700 rounded-lg p-4 space-y-2">
+                      <h4 className="font-semibold text-green-400">{stat.building_name}</h4>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Satisfaction</span>
+                          <span 
+                            className="font-medium rounded px-2"
+                            style={{ color: getSatisfactionColor(parseFloat(stat.avg_satisfaction) || 0) }}
+                          >
+                            {(parseFloat(stat.avg_satisfaction) || 0).toFixed(1)}/10
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 flex items-center gap-1">
+                            <Fuel className="w-3 h-3" /> Carburant
+                          </span>
+                          <span className="font-medium">{stat.fuel || 'N/A'} j</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 flex items-center gap-1">
+                            <Droplets className="w-3 h-3" /> Eau
+                          </span>
+                          <span className="font-medium">{stat.water || 'N/A'} j</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 flex items-center gap-1">
+                            <Package className="w-3 h-3" /> Vivres
+                          </span>
+                          <span className="font-medium">{stat.provisions || 'N/A'} j</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-400">Rapports</span>
+                          <span>{stat.total_reports}</span>
+                        </div>
+                        {stat.last_report_date && (
+                          <div className="text-xs text-slate-500 pt-1 border-t border-slate-600">
+                            Dernier: {new Date(stat.last_report_date).toLocaleDateString('fr-FR')}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
-                  {loading && (
-                    <div className="flex justify-start">
-                      <div className="bg-slate-700 rounded-lg p-4">
-                        <div className="flex gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                          <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                          <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                        </div>
+                </div>
+              </div>
+            )}
+
+            {/* AI Chat Section */}
+            <div className="bg-slate-800 rounded-lg p-6 flex flex-col h-96">
+              <h3 className="text-xl font-semibold mb-4">Assistant IA</h3>
+              <div className="flex-1 overflow-y-auto mb-4 space-y-4 bg-slate-900 rounded p-4">
+                {conversation.length === 0 && (
+                  <div className="text-center text-slate-400 py-8">
+                    <p>Posez vos questions sur les données des bâtiments</p>
+                  </div>
+                )}
+                {conversation.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-2xl rounded-lg p-3 text-sm ${
+                      msg.role === 'user' 
+                        ? 'bg-green-600 text-white' 
+                        : 'bg-slate-700 text-slate-100'
+                    }`}>
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    </div>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-slate-700 rounded-lg p-3">
+                      <div className="flex gap-2">
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                       </div>
                     </div>
-                  )}
-                </div>
-                {selectedBase && selectedBaseReports.length > 0 && (
-                  <div className="p-4 border-t border-slate-700">
-                    <button
-                      onClick={generateAISummary}
-                      disabled={loading}
-                      className="w-full bg-green-600 hover:bg-green-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Send className="w-5 h-5" />
-                      {loading ? 'Analyse en cours...' : 'Générer l\'Analyse IA'}
-                    </button>
                   </div>
                 )}
               </div>
+              <form onSubmit={handleChatSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Posez votre question..."
+                  disabled={chatLoading}
+                  className="flex-1 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="bg-green-600 hover:bg-green-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
             </div>
           </div>
         )}
