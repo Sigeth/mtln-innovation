@@ -12,6 +12,17 @@ const ArmyBaseSystem = () => {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [stats, setStats] = useState([]);
+  const [userRole, setUserRole] = useState('commandant'); // 'commandant' or 'prefet'
+  
+  // Date range state
+  const [dateRange, setDateRange] = useState(() => {
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - 14 * 24 * 60 * 60 * 1000); // 2 weeks ago
+    return {
+      start: startDate.toISOString().split('T')[0],
+      end: endDate.toISOString().split('T')[0]
+    };
+  });
 
   const [formData, setFormData] = useState({
     buildingName: '',
@@ -47,12 +58,26 @@ const ArmyBaseSystem = () => {
     if (activeTab === 'summary') {
       fetchStats();
     }
-  }, [activeTab]);
+  }, [activeTab, dateRange]);
+
+  // When role changes to commandant, reset to form tab and select first building
+  useEffect(() => {
+    if (userRole === 'commandant') {
+      setActiveTab('form');
+      if (bases.length > 0 && !selectedBase) {
+        setSelectedBase(bases[0].name);
+      }
+    }
+  }, [userRole]);
 
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/stats');
+      const params = new URLSearchParams({
+        startDate: dateRange.start,
+        endDate: dateRange.end
+      });
+      const response = await fetch(`/api/stats?${params}`);
       const data = await response.json();
       if (data.success) {
         setStats(data.stats);
@@ -213,9 +238,35 @@ const ArmyBaseSystem = () => {
       {/* Header */}
       <header className="bg-slate-800 border-b border-slate-700 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <Shield className="w-8 h-8 text-green-500" />
-            <h1 className="text-2xl font-bold">Système de Gestion Militaire</h1>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Shield className="w-8 h-8 text-green-500" />
+              <h1 className="text-2xl font-bold">Horizon</h1>
+            </div>
+            
+            {/* Role Toggle */}
+            <div className="flex items-center gap-3 bg-slate-700 rounded-full p-1">
+              <button
+                onClick={() => setUserRole('commandant')}
+                className={`px-4 py-2 rounded-full font-medium transition-colors ${
+                  userRole === 'commandant'
+                    ? 'bg-green-600 text-white'
+                    : 'text-slate-300 hover:text-slate-100'
+                }`}
+              >
+                Commandant
+              </button>
+              <button
+                onClick={() => setUserRole('prefet')}
+                className={`px-4 py-2 rounded-full font-medium transition-colors ${
+                  userRole === 'prefet'
+                    ? 'bg-green-600 text-white'
+                    : 'text-slate-300 hover:text-slate-100'
+                }`}
+              >
+                Préfet Maritime
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -255,6 +306,24 @@ const ArmyBaseSystem = () => {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {activeTab === 'form' ? (
           <div className="max-w-3xl mx-auto">
+            {userRole === 'commandant' && bases.length > 0 && (
+              <div className="mb-6 bg-slate-800 rounded-lg p-4">
+                <label className="block text-sm font-medium mb-2">Bâtiment</label>
+                <select
+                  value={selectedBase || ''}
+                  onChange={(e) => setSelectedBase(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                >
+                  <option value="">Sélectionnez un bâtiment</option>
+                  {bases.map(base => (
+                    <option key={base.name} value={base.name}>
+                      {base.name} ({base.reportCount} rapports)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="bg-slate-800 rounded-lg shadow-xl p-8 space-y-6">
               <div>
                 <label className="block text-sm font-medium mb-2">Nom du Bâtiment</label>
@@ -445,90 +514,162 @@ const ArmyBaseSystem = () => {
           </div>
         ) : (
           <div className="flex flex-col gap-6 h-full">
-            {/* Global Stats Section */}
-            {loading ? (
-              <div className="text-center py-8 text-slate-400">Chargement des données...</div>
-            ) : globalStats ? (
-              <div className="bg-slate-800 rounded-lg p-6">
-                <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                  <TrendingUp className="w-6 h-6 text-green-500" />
-                  Statistiques Globales
-                </h2>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div className="bg-slate-700 rounded-lg p-4">
-                    <div className="text-slate-400 mb-1">Bâtiments</div>
-                    <div className="text-2xl font-semibold text-green-400">{globalStats.totalBuildings}</div>
-                  </div>
-                  <div className="bg-slate-700 rounded-lg p-4">
-                    <div className="text-slate-400 mb-1">Total Rapports</div>
-                    <div className="text-2xl font-semibold">{globalStats.totalReports}</div>
-                  </div>
-                  <div className="bg-slate-700 rounded-lg p-4">
-                    <div className="text-slate-400 mb-1">Satisfaction moy.</div>
-                    <div 
-                      className="text-2xl font-semibold rounded px-2 py-1"
-                      style={{ color: getSatisfactionColor(parseFloat(globalStats.avgSatisfaction)) }}
-                    >
-                      {globalStats.avgSatisfaction}/10
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {/* Buildings Stats Section */}
-            {stats.length > 0 && (
-              <div className="bg-slate-800 rounded-lg p-6">
-                <h3 className="text-xl font-semibold mb-4">Détails par Bâtiment</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {stats.map(stat => (
-                    <div key={stat.building_name} className="bg-slate-700 rounded-lg p-4 space-y-2">
-                      <h4 className="font-semibold text-green-400">{stat.building_name}</h4>
-                      <div className="text-sm space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Satisfaction</span>
-                          <span 
-                            className="font-medium rounded px-2"
-                            style={{ color: getSatisfactionColor(parseFloat(stat.avg_satisfaction) || 0) }}
-                          >
-                            {(parseFloat(stat.avg_satisfaction) || 0).toFixed(1)}/10
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400 flex items-center gap-1">
-                            <Fuel className="w-3 h-3" /> Carburant
-                          </span>
-                          <span className="font-medium">{stat.fuel || 'N/A'} j</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400 flex items-center gap-1">
-                            <Droplets className="w-3 h-3" /> Eau
-                          </span>
-                          <span className="font-medium">{stat.water || 'N/A'} j</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400 flex items-center gap-1">
-                            <Package className="w-3 h-3" /> Vivres
-                          </span>
-                          <span className="font-medium">{stat.provisions || 'N/A'} j</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-400">Rapports</span>
-                          <span>{stat.total_reports}</span>
-                        </div>
-                        {stat.last_report_date && (
-                          <div className="text-xs text-slate-500 pt-1 border-t border-slate-600">
-                            Dernier: {new Date(stat.last_report_date).toLocaleDateString('fr-FR')}
-                          </div>
-                        )}
+            {/* Global Stats Section - Only for Préfet */}
+            {userRole === 'prefet' && (
+              <>
+                {loading ? (
+                  <div className="text-center py-8 text-slate-400">Chargement des données...</div>
+                ) : globalStats ? (
+                  <div className="bg-slate-800 rounded-lg p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold flex items-center gap-2">
+                        <TrendingUp className="w-6 h-6 text-green-500" />
+                        Statistiques Globales
+                      </h2>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-slate-400" />
+                        <input
+                          type="date"
+                          value={dateRange.start}
+                          onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                          className="px-3 py-1 bg-slate-700 border border-slate-600 rounded text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                        <span className="text-slate-400">à</span>
+                        <input
+                          type="date"
+                          value={dateRange.end}
+                          onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                          className="px-3 py-1 bg-slate-700 border border-slate-600 rounded text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="bg-slate-700 rounded-lg p-4">
+                        <div className="text-slate-400 mb-1">Bâtiments</div>
+                        <div className="text-2xl font-semibold text-green-400">{globalStats.totalBuildings}</div>
+                      </div>
+                      <div className="bg-slate-700 rounded-lg p-4">
+                        <div className="text-slate-400 mb-1">Total Rapports</div>
+                        <div className="text-2xl font-semibold">{globalStats.totalReports}</div>
+                      </div>
+                      <div className="bg-slate-700 rounded-lg p-4">
+                        <div className="text-slate-400 mb-1">Satisfaction moy.</div>
+                        <div 
+                          className="text-2xl font-semibold rounded px-2 py-1"
+                          style={{ color: getSatisfactionColor(parseFloat(globalStats.avgSatisfaction)) }}
+                        >
+                          {globalStats.avgSatisfaction}/10
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Buildings Stats Section */}
+                {stats.length > 0 && (
+                  <div className="bg-slate-800 rounded-lg p-6">
+                    <h3 className="text-xl font-semibold mb-4">Détails par Bâtiment</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {stats.map(stat => (
+                        <div key={stat.building_name} className="bg-slate-700 rounded-lg p-4 space-y-2">
+                          <h4 className="font-semibold text-green-400">{stat.building_name}</h4>
+                          <div className="text-sm space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Satisfaction</span>
+                              <span 
+                                className="font-medium rounded px-2"
+                                style={{ color: getSatisfactionColor(parseFloat(stat.avg_satisfaction) || 0) }}
+                              >
+                                {(parseFloat(stat.avg_satisfaction) || 0).toFixed(1)}/10
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400 flex items-center gap-1">
+                                <Fuel className="w-3 h-3" /> Carburant
+                              </span>
+                              <span className="font-medium">{stat.fuel || 'N/A'} j</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400 flex items-center gap-1">
+                                <Droplets className="w-3 h-3" /> Eau
+                              </span>
+                              <span className="font-medium">{stat.water || 'N/A'} j</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400 flex items-center gap-1">
+                                <Package className="w-3 h-3" /> Vivres
+                              </span>
+                              <span className="font-medium">{stat.provisions || 'N/A'} j</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-400">Rapports</span>
+                              <span>{stat.total_reports}</span>
+                            </div>
+                            {stat.last_report_date && (
+                              <div className="text-xs text-slate-500 pt-1 border-t border-slate-600">
+                                Dernier: {new Date(stat.last_report_date).toLocaleDateString('fr-FR')}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Commandant Single Building Stats */}
+            {userRole === 'commandant' && stats.length > 0 && (
+              <div className="bg-slate-800 rounded-lg p-6">
+                <h3 className="text-xl font-semibold mb-4">Statistiques de mon Bâtiment</h3>
+                {stats.slice(0, 1).map(stat => (
+                  <div key={stat.building_name} className="bg-slate-700 rounded-lg p-6 space-y-4">
+                    <h4 className="font-semibold text-lg text-green-400">{stat.building_name}</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      <div className="bg-slate-600 rounded-lg p-4">
+                        <div className="text-slate-400 text-sm mb-1">Satisfaction</div>
+                        <div 
+                          className="text-2xl font-semibold rounded px-2"
+                          style={{ color: getSatisfactionColor(parseFloat(stat.avg_satisfaction) || 0) }}
+                        >
+                          {(parseFloat(stat.avg_satisfaction) || 0).toFixed(1)}/10
+                        </div>
+                      </div>
+                      <div className="bg-slate-600 rounded-lg p-4">
+                        <div className="text-slate-400 text-sm mb-1 flex items-center gap-1">
+                          <Fuel className="w-3 h-3" /> Carburant
+                        </div>
+                        <div className="text-2xl font-semibold">{stat.fuel || 'N/A'} j</div>
+                      </div>
+                      <div className="bg-slate-600 rounded-lg p-4">
+                        <div className="text-slate-400 text-sm mb-1 flex items-center gap-1">
+                          <Droplets className="w-3 h-3" /> Eau
+                        </div>
+                        <div className="text-2xl font-semibold">{stat.water || 'N/A'} j</div>
+                      </div>
+                      <div className="bg-slate-600 rounded-lg p-4">
+                        <div className="text-slate-400 text-sm mb-1 flex items-center gap-1">
+                          <Package className="w-3 h-3" /> Vivres
+                        </div>
+                        <div className="text-2xl font-semibold">{stat.provisions || 'N/A'} j</div>
+                      </div>
+                      <div className="bg-slate-600 rounded-lg p-4">
+                        <div className="text-slate-400 text-sm mb-1">Rapports</div>
+                        <div className="text-2xl font-semibold">{stat.total_reports}</div>
+                      </div>
+                    </div>
+                    {stat.last_report_date && (
+                      <div className="text-sm text-slate-400 pt-2 border-t border-slate-600">
+                        Dernier rapport: {new Date(stat.last_report_date).toLocaleDateString('fr-FR')}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
 
-            {/* AI Chat Section */}
+            {/* AI Chat Section - Available for both roles */}
             <div className="bg-slate-800 rounded-lg p-6 flex flex-col h-96">
               <h3 className="text-xl font-semibold mb-4">Assistant IA</h3>
               <div className="flex-1 overflow-y-auto mb-4 space-y-4 bg-slate-900 rounded p-4">
