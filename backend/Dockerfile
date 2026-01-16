@@ -30,6 +30,7 @@ EXPOSE 5000
 # Set environment variables
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
+ENV PATH="/home/appuser/app/.venv/bin:$PATH"
 
 # Run the application
 CMD ["python", "app.py"]
